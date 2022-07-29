@@ -36,6 +36,8 @@ type ethNetwork = 'mainnet' | 'kovan' | 'goerli'
         false
       ),
       l2RpcProvider: config.str('l2-rpc-endpoint'),
+      l2RpcProviders: config.str('l2-rpc-endpoints'),
+      l2RpcTimeout: config.str('l2-rpc-timeout'),
       l2RpcProviderUser: config.str('l2-rpc-user'),
       l2RpcProviderPassword: config.str('l2-rpc-password'),
       l2ChainId: config.uint('l2-chain-id'),

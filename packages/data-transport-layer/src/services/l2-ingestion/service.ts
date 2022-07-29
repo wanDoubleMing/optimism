@@ -81,6 +81,7 @@ export class L2IngestionService extends BaseService<L2IngestionServiceOptions> {
   private state: {
     db: TransportDB
     l2RpcProvider: StaticJsonRpcProvider
+    l2RpcProviders: {} // Map<string, StaticJsonRpcProvider>
   } = {} as any
 
   protected async _init(): Promise<void> {
@@ -96,15 +97,31 @@ export class L2IngestionService extends BaseService<L2IngestionServiceOptions> {
       l2ChainId: this.options.l2ChainId,
     })
 
-    this.state.l2RpcProvider =
-      typeof this.options.l2RpcProvider === 'string'
-        ? new StaticJsonRpcProvider({
+    if (this.options.l2RpcProviders && typeof this.options.l2RpcProvider === 'string') {
+      let providers = this.options.l2RpcProviders.split(",")
+      let rpcProviders = {};
+      providers.forEach(function (provider) {
+        rpcProviders[provider] = new StaticJsonRpcProvider({
+          url: this.options.l2RpcProvider,
+          user: this.options.l2RpcProviderUser,
+          password: this.options.l2RpcProviderPassword,
+          headers: { 'User-Agent': 'data-transport-layer' },
+          timeout: this.state.l2RpcTimeout,
+        })
+      })
+      this.state.l2RpcProviders = rpcProviders
+    } else {
+      // init single rpc
+      this.state.l2RpcProvider =
+        typeof this.options.l2RpcProvider === 'string'
+          ? new StaticJsonRpcProvider({
             url: this.options.l2RpcProvider,
             user: this.options.l2RpcProviderUser,
             password: this.options.l2RpcProviderPassword,
             headers: { 'User-Agent': 'data-transport-layer' },
           })
-        : this.options.l2RpcProvider
+          : this.options.l2RpcProvider
+    }
   }
 
   protected async ensure(): Promise<void> {
@@ -164,12 +181,39 @@ export class L2IngestionService extends BaseService<L2IngestionServiceOptions> {
         const highestSyncedL2BlockNumber =
           (await this.state.db.getHighestSyncedUnconfirmedBlock()) || 1
 
-        const currentL2Block = await this.state.l2RpcProvider.getBlockNumber()
+        let currentL2Block
+        if (this.state.l2RpcProviders) {
+          let blockNumPromises = []
+          for (const [providerName, provider] of Object.entries(this.state.l2RpcProviders)) {
+            blockNumPromises.push(async () => {
+              try {
+                const num = await provider.getBlockNumber()
+                this.logger.info(`The block of provider: ${providerName} => ${num}`)
+                return { "name": providerName, "num": num }
+              } catch (err) {
+                this.logger.warn("Failed to get blockNum from: %s, %s", providerName, err)
+              }
+            })
+          }
+          const blockObjs = await Promise.all(blockNumPromises)
+          const validBlockObjs = blockObjs.filter(blockObj => blockObj && blockObj["name"]).sort((b1, b2) => b2["num"] - b1["num"]);
+          if (validBlockObjs && validBlockObjs.length >= 0) {
+            currentL2Block = validBlockObjs[0]["num"];
+            // Reset provider
+            this.state.l2RpcProvider = this.state.l2RpcProviders[validBlockObjs[0]["name"]]
+          } else {
+            // wait next query if the currentL2Block is zero
+            this.logger.warn("The CurrentL2Block is 0 after all provider query failed or timeout")
+            currentL2Block = 0;
+          }
+        } else {
+          currentL2Block = await this.state.l2RpcProvider.getBlockNumber()
+        }
 
         // Make sure we don't exceed the tip.
         const targetL2Block = Math.min(
           highestSyncedL2BlockNumber +
-            this.options.transactionsPerPollingInterval,
+          this.options.transactionsPerPollingInterval,
           currentL2Block
         )
 

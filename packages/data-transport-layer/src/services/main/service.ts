@@ -24,6 +24,8 @@ export interface L1DataTransportServiceOptions {
   l1RpcProviderPassword?: string
   l2ChainId: number
   l2RpcProvider: string
+  l2RpcProviders: string
+  l2RpcTimeout: number
   l2RpcProviderUser?: string
   l2RpcProviderPassword?: string
   metrics?: Metrics
